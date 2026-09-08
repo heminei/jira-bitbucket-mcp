@@ -1,0 +1,58 @@
+{
+  "name": "jira-bitbucket-mcp",
+  "version": "1.0.0",
+  "description": "MCP servers for self-hosted Jira and Bitbucket Server / Data Center instances",
+  "license": "MIT",
+  "author": "Martin Bratvanov",
+  "homepage": "https://github.com/heminei/jira-bitbucket-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/heminei/jira-bitbucket-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/heminei/jira-bitbucket-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "jira",
+    "bitbucket",
+    "atlassian",
+    "data-center",
+    "self-hosted",
+    "llm",
+    "ai"
+  ],
+  "type": "module",
+  "bin": {
+    "jira-bitbucket-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepublishOnly": "npm run build",
+    "start:jira": "node dist/jira/index.js",
+    "start:bitbucket": "node dist/bitbucket/index.js",
+    "inspect:jira": "npx -y @modelcontextprotocol/inspector node dist/jira/index.js",
+    "inspect:bitbucket": "npx -y @modelcontextprotocol/inspector node dist/bitbucket/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
