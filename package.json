@@ -2,16 +2,6 @@
   "name": "jira-bitbucket-mcp",
   "version": "1.0.0",
   "description": "MCP servers for self-hosted Jira and Bitbucket Server / Data Center instances",
-  "license": "MIT",
-  "author": "Martin Bratvanov",
-  "homepage": "https://github.com/heminei/jira-bitbucket-mcp#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/heminei/jira-bitbucket-mcp.git"
-  },
-  "bugs": {
-    "url": "https://github.com/heminei/jira-bitbucket-mcp/issues"
-  },
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -23,7 +13,18 @@
     "llm",
     "ai"
   ],
+  "homepage": "https://github.com/heminei/jira-bitbucket-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/heminei/jira-bitbucket-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/heminei/jira-bitbucket-mcp.git"
+  },
+  "license": "MIT",
+  "author": "Martin Bratvanov",
   "type": "module",
+  "main": "index.js",
   "bin": {
     "jira-bitbucket-mcp": "dist/cli.js"
   },
