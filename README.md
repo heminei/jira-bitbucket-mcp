@@ -106,9 +106,11 @@ In `claude_desktop_config.json`, or the equivalent config of your client:
 | `JIRA_PAT` | yes | – | Personal access token, sent as `Authorization: Bearer`. |
 | `JIRA_DEFAULT_PROJECT` | no | – | Project key used when a tool omits one, e.g. `PROJ`. |
 | `JIRA_READ_ONLY` | no | `0` | Set to `1` to register only the read tools. |
-| `JIRA_ALLOW_DELETE` | no | `0` | Set to `1` to register `jira_delete_issue`. Deletion is permanent. |
-| `JIRA_TIMEOUT_MS` | no | `30000` | Per-request timeout. |
+| `JIRA_ALLOW_DELETE` | no | `0` | Set to `1` to register `jira_delete_issue` and `jira_delete_attachment`. Deletion is permanent. |
+| `JIRA_TIMEOUT_MS` | no | `30000` | Per-request timeout. Attachment transfers use at least 120000. |
 | `JIRA_MAX_TEXT_LENGTH` | no | `4000` | Descriptions and comments are truncated to this length. |
+| `JIRA_ATTACHMENTS_DIR` | no | `<tmp>/jira-bitbucket-mcp/attachments` | Only directory where attachments are saved to and uploaded from. |
+| `JIRA_MAX_ATTACHMENT_BYTES` | no | `0` | Maximum attachment size to download. `0` means no limit. |
 
 ### Bitbucket
 
@@ -120,6 +122,7 @@ In `claude_desktop_config.json`, or the equivalent config of your client:
 | `BITBUCKET_DEFAULT_REPO` | no | – | Repository slug, e.g. `my-repo`. |
 | `BITBUCKET_READ_ONLY` | no | `0` | Set to `1` to register only the read tools. |
 | `BITBUCKET_ALLOW_MERGE` | no | `0` | Set to `1` to register the merge and decline tools. |
+| `BITBUCKET_ALLOW_DELETE` | no | `0` | Set to `1` to register `bitbucket_delete_pull_request_comment`. Deletion is permanent. |
 | `BITBUCKET_TIMEOUT_MS` | no | `30000` | Per-request timeout. |
 | `BITBUCKET_MAX_TEXT_LENGTH` | no | `20000` | Diffs, files and descriptions are truncated to this length. |
 
@@ -127,24 +130,25 @@ In `claude_desktop_config.json`, or the equivalent config of your client:
 
 ### Jira
 
-Read: `jira_myself`, `jira_search` (JQL), `jira_get_issue`, `jira_list_projects`, `jira_get_transitions`, `jira_get_create_meta`, `jira_list_fields`.
+Read: `jira_myself`, `jira_search` (JQL), `jira_get_issue`, `jira_list_projects`, `jira_get_transitions`, `jira_get_create_meta`, `jira_list_fields`, `jira_list_attachments`, `jira_get_attachment`, `jira_list_worklogs`, `jira_list_link_types`, `jira_list_watchers`, plus `jira_list_boards`, `jira_list_sprints` and `jira_get_sprint_issues` (need Jira Software).
 
-Write: `jira_create_issue`, `jira_update_issue`, `jira_add_comment`, `jira_transition_issue`, `jira_assign_issue`, `jira_add_worklog`, and `jira_delete_issue` (opt-in).
+Write: `jira_create_issue`, `jira_update_issue`, `jira_add_comment`, `jira_update_comment`, `jira_transition_issue`, `jira_assign_issue`, `jira_add_worklog`, `jira_link_issues`, `jira_add_watcher`, `jira_remove_watcher`, `jira_add_attachment`, plus `jira_delete_issue`, `jira_delete_comment` and `jira_delete_attachment` (opt-in).
 
 ### Bitbucket
 
-Read: `bitbucket_myself`, `bitbucket_list_repos`, `bitbucket_list_pull_requests`, `bitbucket_get_pull_request`, `bitbucket_get_pull_request_diff`, `bitbucket_list_branches`, `bitbucket_list_commits`, `bitbucket_get_file`.
+Read: `bitbucket_myself`, `bitbucket_list_repos`, `bitbucket_list_pull_requests`, `bitbucket_get_pull_request`, `bitbucket_get_pull_request_diff`, `bitbucket_list_pull_request_comments`, `bitbucket_list_pull_request_changes`, `bitbucket_get_build_status`, `bitbucket_list_branches`, `bitbucket_list_commits`, `bitbucket_get_file`, `bitbucket_browse_files`, `bitbucket_search_code` (needs the Data Center built-in code search).
 
-Write: `bitbucket_create_pull_request`, `bitbucket_update_pull_request`, `bitbucket_add_pull_request_comment`, `bitbucket_review_pull_request`, plus `bitbucket_merge_pull_request` and `bitbucket_decline_pull_request` (opt-in).
+Write: `bitbucket_create_pull_request`, `bitbucket_update_pull_request`, `bitbucket_add_pull_request_comment` (general, inline or reply), `bitbucket_update_pull_request_comment` (edit, resolve, task), `bitbucket_review_pull_request`, plus `bitbucket_merge_pull_request` and `bitbucket_decline_pull_request` (opt-in via `BITBUCKET_ALLOW_MERGE`) and `bitbucket_delete_pull_request_comment` (opt-in via `BITBUCKET_ALLOW_DELETE`).
 
 Responses are trimmed projections; several read tools accept `raw: true` for the full payload.
 
 ## Safety
 
-- Destructive operations are opt-in: `JIRA_ALLOW_DELETE` and `BITBUCKET_ALLOW_MERGE` are off by default.
+- Destructive operations are opt-in: `JIRA_ALLOW_DELETE`, `BITBUCKET_ALLOW_DELETE` and `BITBUCKET_ALLOW_MERGE` are off by default.
 - `JIRA_READ_ONLY=1` / `BITBUCKET_READ_ONLY=1` register the read tools only — a good default for exploratory agents.
 - Tokens are never logged and are stripped from error messages before they are returned.
 - `*_BASE_URL` must be https unless it points at localhost.
+- Attachments are only written to and uploaded from `JIRA_ATTACHMENTS_DIR`; paths outside it are rejected. `jira_get_attachment` also works in read-only mode because it only writes to that local directory.
 
 ## Notes
 

@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertWritable, issueKeySchema as issueKey } from "../common.js";
+import { assertWritable, commentIdSchema as commentId, issueKeySchema as issueKey } from "../common.js";
 import { jsonResult, textResult } from "../../shared/format.js";
 import type { JiraClient } from "../jira-client.js";
 
@@ -158,9 +158,131 @@ export function registerWriteTools(server: McpServer, client: JiraClient): void 
         },
     );
 
+    server.registerTool(
+        "jira_update_comment",
+        {
+            title: "Jira: edit comment",
+            description: "Replace the body of an existing comment.",
+            inputSchema: {
+                issueKey,
+                commentId,
+                body: z.string().trim().min(1).describe("New comment body in Jira wiki markup."),
+            },
+        },
+        async ({ issueKey: key, commentId: id, body }) => {
+            assertWritable(client);
+
+            await client.request(`/issue/${encodeURIComponent(key)}/comment/${encodeURIComponent(id)}`, {
+                method: "PUT",
+                body: { body },
+            });
+
+            return textResult(`Updated comment ${id} on ${key}.`);
+        },
+    );
+
+    server.registerTool(
+        "jira_link_issues",
+        {
+            title: "Jira: link issues",
+            description:
+                'Create a link between two issues. Use jira_list_link_types for valid type names. ' +
+                'For "Blocks", the outward issue blocks the inward issue.',
+            inputSchema: {
+                type: z.string().trim().min(1).describe('Link type name, e.g. "Blocks" or "Relates".'),
+                outwardIssue: issueKey.describe('Issue that gets the outward description, e.g. the one that "blocks".'),
+                inwardIssue: issueKey.describe('Issue that gets the inward description, e.g. the one that "is blocked by".'),
+                comment: z.string().trim().optional().describe("Comment to add with the link."),
+            },
+        },
+        async ({ type, outwardIssue, inwardIssue, comment }) => {
+            assertWritable(client);
+
+            const payload: Record<string, unknown> = {
+                type: { name: type },
+                outwardIssue: { key: outwardIssue },
+                inwardIssue: { key: inwardIssue },
+            };
+            if (comment) {
+                payload.comment = { body: comment };
+            }
+
+            await client.request("/issueLink", { method: "POST", body: payload });
+
+            return textResult(`Linked ${outwardIssue} -> ${inwardIssue} (${type}).`);
+        },
+    );
+
+    server.registerTool(
+        "jira_add_watcher",
+        {
+            title: "Jira: add watcher",
+            description: "Add a user to an issue's watchers.",
+            inputSchema: {
+                issueKey,
+                username: z.string().trim().min(1).describe("Jira Server username of the user to add."),
+            },
+        },
+        async ({ issueKey: key, username }) => {
+            assertWritable(client);
+
+            await client.request(`/issue/${encodeURIComponent(key)}/watchers`, { method: "POST", body: username });
+
+            return textResult(`Added ${username} as a watcher of ${key}.`);
+        },
+    );
+
+    server.registerTool(
+        "jira_remove_watcher",
+        {
+            title: "Jira: remove watcher",
+            description: "Remove a user from an issue's watchers.",
+            inputSchema: {
+                issueKey,
+                username: z.string().trim().min(1).describe("Jira Server username of the user to remove."),
+            },
+        },
+        async ({ issueKey: key, username }) => {
+            assertWritable(client);
+
+            await client.request(`/issue/${encodeURIComponent(key)}/watchers`, {
+                method: "DELETE",
+                query: { username },
+            });
+
+            return textResult(`Removed ${username} from the watchers of ${key}.`);
+        },
+    );
+
     if (!client.allowDelete) {
         return;
     }
+
+    server.registerTool(
+        "jira_delete_comment",
+        {
+            title: "Jira: delete comment",
+            description: "Permanently delete a comment. This cannot be undone. Requires JIRA_ALLOW_DELETE=1.",
+            inputSchema: {
+                issueKey,
+                commentId,
+                confirm: z.literal(true).describe("Must be true to acknowledge that the deletion is irreversible."),
+            },
+        },
+        async ({ issueKey: key, commentId: id }) => {
+            assertWritable(client);
+
+            if (!client.allowDelete) {
+                throw new Error("Deleting comments is disabled; start the server with JIRA_ALLOW_DELETE=1 to enable it.");
+            }
+
+            await client.request(`/issue/${encodeURIComponent(key)}/comment/${encodeURIComponent(id)}`, {
+                method: "DELETE",
+            });
+
+            return textResult(`Deleted comment ${id} on ${key}.`);
+        },
+    );
 
     server.registerTool(
         "jira_delete_issue",

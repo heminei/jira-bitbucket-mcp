@@ -3,6 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadConfig } from "./config.js";
 import { JiraClient } from "./jira-client.js";
+import { registerAgileTools } from "./tools/agile.js";
+import { registerAttachmentTools } from "./tools/attachments.js";
 import { registerReadTools } from "./tools/read.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerWriteTools } from "./tools/write.js";
@@ -12,7 +14,7 @@ async function main(): Promise<void> {
     const client = new JiraClient(config);
 
     const server = new McpServer(
-        { name: "jira-server", version: "1.0.0" },
+        { name: "jira-server", version: "1.1.0" },
         {
             instructions:
                 "Tools for a self-hosted Jira Server / Data Center instance (REST API v2). " +
@@ -22,6 +24,8 @@ async function main(): Promise<void> {
     );
 
     registerReadTools(server, client);
+    registerAttachmentTools(server, client);
+    registerAgileTools(server, client);
     if (!config.readOnly) {
         registerWriteTools(server, client);
         registerWorkflowTools(server, client);

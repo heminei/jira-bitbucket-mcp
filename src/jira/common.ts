@@ -6,6 +6,18 @@ export const issueKeySchema = z
     .trim()
     .regex(/^[A-Za-z][A-Za-z0-9_]*-\d+$/, "Expected an issue key such as PROJ-1234");
 
+export const commentIdSchema = z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "Expected a numeric comment id")
+    .describe("Comment id.");
+
+export const attachmentIdSchema = z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "Expected a numeric attachment id")
+    .describe("Attachment id as returned by jira_list_attachments.");
+
 /** Second line of defence: write tools are not registered in read-only mode either. */
 export function assertWritable(client: JiraClient): void {
     if (client.readOnly) {

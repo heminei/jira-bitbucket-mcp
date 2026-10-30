@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { issueKeySchema as issueKey } from "../common.js";
-import { jsonResult, truncate } from "../../shared/format.js";
+import { jsonResult, pickName, truncate } from "../../shared/format.js";
 import { summarizeIssue } from "../issue.js";
 import type { JiraClient } from "../jira-client.js";
 
@@ -302,6 +302,90 @@ export function registerReadTools(server: McpServer, client: JiraClient): void {
                 }));
 
             return jsonResult({ total: filtered.length, fields: filtered });
+        },
+    );
+
+    server.registerTool(
+        "jira_list_worklogs",
+        {
+            title: "Jira: list worklogs",
+            description: "List the time-tracking worklog entries logged on an issue.",
+            inputSchema: {
+                issueKey,
+                startAt: z.number().int().min(0).optional().describe("Zero-based pagination offset."),
+                maxResults: z.number().int().min(1).max(100).optional().describe("Page size. Defaults to 50."),
+            },
+        },
+        async ({ issueKey: key, startAt, maxResults }) => {
+            const response = await client.request<{
+                startAt?: number;
+                total?: number;
+                worklogs?: Record<string, unknown>[];
+            }>(`/issue/${encodeURIComponent(key)}/worklog`, {
+                query: { startAt: startAt ?? 0, maxResults: maxResults ?? 50 },
+            });
+
+            return jsonResult({
+                issueKey: key,
+                startAt: response.startAt ?? 0,
+                total: response.total ?? 0,
+                worklogs: (response.worklogs ?? []).map((worklog) => ({
+                    id: worklog.id ?? null,
+                    author: pickName(worklog.author),
+                    started: worklog.started ?? null,
+                    timeSpent: worklog.timeSpent ?? null,
+                    timeSpentSeconds: worklog.timeSpentSeconds ?? null,
+                    comment: truncate(worklog.comment, client.maxTextLength),
+                })),
+            });
+        },
+    );
+
+    server.registerTool(
+        "jira_list_link_types",
+        {
+            title: "Jira: list issue link types",
+            description: "List the issue link types (e.g. Blocks, Relates) with their inward and outward descriptions.",
+            inputSchema: {},
+        },
+        async () => {
+            const response = await client.request<{ issueLinkTypes?: Record<string, unknown>[] }>("/issueLinkType");
+
+            return jsonResult({
+                linkTypes: (response.issueLinkTypes ?? []).map((type) => ({
+                    id: type.id ?? null,
+                    name: type.name ?? null,
+                    inward: type.inward ?? null,
+                    outward: type.outward ?? null,
+                })),
+            });
+        },
+    );
+
+    server.registerTool(
+        "jira_list_watchers",
+        {
+            title: "Jira: list watchers",
+            description: "List the users watching an issue.",
+            inputSchema: { issueKey },
+        },
+        async ({ issueKey: key }) => {
+            const response = await client.request<{
+                watchCount?: number;
+                isWatching?: boolean;
+                watchers?: Record<string, unknown>[];
+            }>(`/issue/${encodeURIComponent(key)}/watchers`);
+
+            return jsonResult({
+                issueKey: key,
+                watchCount: response.watchCount ?? 0,
+                isWatching: response.isWatching ?? false,
+                watchers: (response.watchers ?? []).map((watcher) => ({
+                    name: watcher.name ?? null,
+                    displayName: watcher.displayName ?? null,
+                    active: watcher.active ?? null,
+                })),
+            });
         },
     );
 }

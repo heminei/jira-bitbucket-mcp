@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { jsonResult, truncate } from "../../shared/format.js";
 import type { BitbucketClient } from "../bitbucket-client.js";
-import { prSchema, repoSchema, summarizePullRequest } from "../common.js";
+import { encodePath, prSchema, repoSchema, summarizeChange, summarizeComment, summarizePullRequest } from "../common.js";
 
 export function registerReadTools(server: McpServer, client: BitbucketClient): void {
     server.registerTool(
@@ -119,12 +119,7 @@ export function registerReadTools(server: McpServer, client: BitbucketClient): v
                 const changes = await client.request<{ values?: Record<string, unknown>[] }>(`${base}/changes`, {
                     query: { limit: 200 },
                 });
-                result.changes = (changes.values ?? []).map((change) => ({
-                    path: (change.path as Record<string, unknown> | undefined)?.toString ?? null,
-                    type: change.type ?? null,
-                    linesAdded: (change as { linesAdded?: number }).linesAdded ?? null,
-                    linesRemoved: (change as { linesRemoved?: number }).linesRemoved ?? null,
-                }));
+                result.changes = (changes.values ?? []).map(summarizeChange);
             }
 
             if (includeComments) {
@@ -252,6 +247,250 @@ export function registerReadTools(server: McpServer, client: BitbucketClient): v
             });
 
             return jsonResult({ path, at: at ?? null, content: truncate(content, client.maxTextLength) });
+        },
+    );
+
+    server.registerTool(
+        "bitbucket_list_pull_request_comments",
+        {
+            title: "Bitbucket: list pull request comments",
+            description:
+                "List the comments on a pull request, including inline anchors (file and line), review state and nested replies.",
+            inputSchema: {
+                ...prSchema,
+                limit: z.number().int().min(1).max(100).optional().describe("Activities to scan. Defaults to 50."),
+                start: z.number().int().min(0).optional().describe("Pagination offset."),
+            },
+        },
+        async ({ project, repo, pullRequestId, limit, start }) => {
+            const response = await client.request<{
+                values?: Record<string, unknown>[];
+                isLastPage?: boolean;
+                nextPageStart?: number;
+            }>(`${client.repoPath(project, repo)}/pull-requests/${pullRequestId}/activities`, {
+                query: { limit: limit ?? 50, start: start ?? 0 },
+            });
+
+            return jsonResult({
+                pullRequestId,
+                isLastPage: response.isLastPage ?? true,
+                nextPageStart: response.nextPageStart ?? null,
+                comments: (response.values ?? [])
+                    .filter((activity) => activity.action === "COMMENTED" && activity.comment)
+                    .map((activity) =>
+                        summarizeComment(
+                            activity.comment as Record<string, unknown>,
+                            client,
+                            activity.commentAnchor as Record<string, unknown> | undefined,
+                        ),
+                    ),
+            });
+        },
+    );
+
+    server.registerTool(
+        "bitbucket_list_pull_request_changes",
+        {
+            title: "Bitbucket: list pull request changes",
+            description: "List the files changed by a pull request with the change type (ADD, MODIFY, DELETE, MOVE).",
+            inputSchema: {
+                ...prSchema,
+                limit: z.number().int().min(1).max(500).optional().describe("Defaults to 100."),
+                start: z.number().int().min(0).optional().describe("Pagination offset."),
+            },
+        },
+        async ({ project, repo, pullRequestId, limit, start }) => {
+            const response = await client.request<{
+                values?: Record<string, unknown>[];
+                size?: number;
+                isLastPage?: boolean;
+                nextPageStart?: number;
+            }>(`${client.repoPath(project, repo)}/pull-requests/${pullRequestId}/changes`, {
+                query: { limit: limit ?? 100, start: start ?? 0 },
+            });
+
+            return jsonResult({
+                pullRequestId,
+                size: response.size ?? 0,
+                isLastPage: response.isLastPage ?? true,
+                nextPageStart: response.nextPageStart ?? null,
+                changes: (response.values ?? []).map(summarizeChange),
+            });
+        },
+    );
+
+    server.registerTool(
+        "bitbucket_get_build_status",
+        {
+            title: "Bitbucket: get build status",
+            description:
+                "Return CI build statuses for a commit, or for the latest commit of a pull request's source branch.",
+            inputSchema: {
+                ...repoSchema,
+                commitId: z.string().trim().regex(/^[0-9a-fA-F]{7,40}$/, "Expected a commit hash").optional().describe("Full or abbreviated commit hash."),
+                pullRequestId: z.number().int().min(1).optional().describe("Use this pull request's latest source commit instead of commitId."),
+            },
+        },
+        async ({ project, repo, commitId, pullRequestId }) => {
+            let commit = commitId;
+            if (!commit) {
+                if (pullRequestId === undefined) {
+                    throw new Error("Provide either commitId or pullRequestId.");
+                }
+                const pr = await client.request<{ fromRef?: { latestCommit?: string } }>(
+                    `${client.repoPath(project, repo)}/pull-requests/${pullRequestId}`,
+                );
+                commit = pr.fromRef?.latestCommit;
+                if (!commit) {
+                    throw new Error(`Could not determine the source commit of PR #${pullRequestId}.`);
+                }
+            }
+
+            // Build statuses live under their own REST root, not /rest/api/1.0.
+            const response = await client.request<{ values?: Record<string, unknown>[] }>(
+                `/commits/${encodeURIComponent(commit)}`,
+                { apiPrefix: "/rest/build-status/1.0", query: { limit: 100 } },
+            );
+
+            const statuses = (response.values ?? []).map((status) => ({
+                state: status.state ?? null,
+                key: status.key ?? null,
+                name: status.name ?? null,
+                url: status.url ?? null,
+                description: truncate(status.description, 500),
+                dateAdded: status.dateAdded ?? null,
+            }));
+            const count = (state: string) => statuses.filter((status) => status.state === state).length;
+
+            return jsonResult({
+                commit,
+                successful: count("SUCCESSFUL"),
+                failed: count("FAILED"),
+                inProgress: count("INPROGRESS"),
+                statuses,
+            });
+        },
+    );
+
+    server.registerTool(
+        "bitbucket_browse_files",
+        {
+            title: "Bitbucket: browse files",
+            description:
+                "List a directory's entries, or every file path under it when recursive is true. Use bitbucket_get_file to read a file.",
+            inputSchema: {
+                ...repoSchema,
+                path: z.string().trim().optional().describe("Repository-relative directory. Defaults to the repository root."),
+                at: z.string().trim().optional().describe("Branch, tag or commit id. Defaults to the default branch."),
+                recursive: z.boolean().optional().describe("Return a flat list of all file paths below path."),
+                limit: z.number().int().min(1).max(1000).optional().describe("Defaults to 100."),
+                start: z.number().int().min(0).optional().describe("Pagination offset."),
+            },
+        },
+        async ({ project, repo, path, at, recursive, limit, start }) => {
+            const suffix = path ? `/${encodePath(path)}` : "";
+            const query = { at, limit: limit ?? 100, start: start ?? 0 };
+
+            if (recursive) {
+                const response = await client.request<{
+                    values?: string[];
+                    isLastPage?: boolean;
+                    nextPageStart?: number;
+                }>(`${client.repoPath(project, repo)}/files${suffix}`, { query });
+
+                return jsonResult({
+                    path: path ?? "",
+                    isLastPage: response.isLastPage ?? true,
+                    nextPageStart: response.nextPageStart ?? null,
+                    files: response.values ?? [],
+                });
+            }
+
+            const response = await client.request<{
+                children?: {
+                    values?: Record<string, unknown>[];
+                    isLastPage?: boolean;
+                    nextPageStart?: number;
+                };
+                lines?: unknown;
+            }>(`${client.repoPath(project, repo)}/browse${suffix}`, { query });
+
+            if (!response.children) {
+                throw new Error(`${path ?? ""} is a file, not a directory. Use bitbucket_get_file to read it.`);
+            }
+
+            return jsonResult({
+                path: path ?? "",
+                isLastPage: response.children.isLastPage ?? true,
+                nextPageStart: response.children.nextPageStart ?? null,
+                entries: (response.children.values ?? []).map((entry) => ({
+                    name: (entry.path as Record<string, unknown> | undefined)?.name ?? null,
+                    type: entry.type ?? null,
+                    size: entry.size ?? null,
+                })),
+            });
+        },
+    );
+
+    server.registerTool(
+        "bitbucket_search_code",
+        {
+            title: "Bitbucket: search code",
+            description:
+                "Search file contents across repositories. Requires the Bitbucket Data Center built-in code search; " +
+                "unlike other tools, project and repo are not defaulted from the environment.",
+            inputSchema: {
+                query: z.string().trim().min(1).describe("Search terms."),
+                project: z.string().trim().optional().describe("Restrict to this project key."),
+                repo: z.string().trim().optional().describe("Restrict to this repository slug."),
+                path: z.string().trim().optional().describe("Restrict to paths matching this text."),
+                limit: z.number().int().min(1).max(100).optional().describe("Maximum files to return. Defaults to 25."),
+            },
+        },
+        async ({ query, project, repo, path, limit }) => {
+            const terms = [query];
+            if (project) {
+                terms.push(`project:${project}`);
+            }
+            if (repo) {
+                terms.push(`repo:${repo}`);
+            }
+            if (path) {
+                terms.push(`path:${path}`);
+            }
+
+            const response = await client.request<{
+                code?: { values?: Record<string, unknown>[]; count?: number; isLastPage?: boolean };
+            }>("/search", {
+                apiPrefix: "/rest/search/latest",
+                method: "POST",
+                body: {
+                    query: terms.join(" "),
+                    entities: { code: {} },
+                    limits: { primary: limit ?? 25, secondary: 5 },
+                },
+            });
+
+            const stripMarkup = (text: unknown) => String(text ?? "").replace(/<\/?[^>]+>/g, "");
+            const results = (response.code?.values ?? []).map((hit) => {
+                const repository = (hit.repository ?? {}) as Record<string, unknown>;
+                const file = hit.file as { path?: unknown; toString?: unknown } | string | undefined;
+                const filePath = typeof file === "string" ? file : (file?.path ?? file?.toString ?? null);
+                const contexts = (Array.isArray(hit.hitContexts) ? hit.hitContexts.flat() : []) as Record<string, unknown>[];
+
+                return {
+                    project: (repository.project as Record<string, unknown> | undefined)?.key ?? null,
+                    repo: repository.slug ?? null,
+                    file: filePath,
+                    hitCount: hit.hitCount ?? null,
+                    matches: contexts.slice(0, 5).map((context) => ({
+                        line: context.line ?? null,
+                        text: truncate(stripMarkup(context.text), 300),
+                    })),
+                };
+            });
+
+            return jsonResult({ total: response.code?.count ?? results.length, results });
         },
     );
 }

@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { normalizeBaseUrl, parseBoolean, parseInteger, requireEnv } from "../shared/env.js";
 
 export interface JiraConfig {
@@ -8,6 +10,9 @@ export interface JiraConfig {
     defaultProject: string | null;
     timeoutMs: number;
     maxTextLength: number;
+    attachmentsDir: string;
+    /** 0 means unlimited. */
+    maxAttachmentBytes: number;
 }
 
 export function loadConfig(): JiraConfig {
@@ -20,5 +25,9 @@ export function loadConfig(): JiraConfig {
         defaultProject: process.env.JIRA_DEFAULT_PROJECT?.trim() || null,
         timeoutMs: parseInteger(process.env.JIRA_TIMEOUT_MS, 30000),
         maxTextLength: parseInteger(process.env.JIRA_MAX_TEXT_LENGTH, 4000),
+        attachmentsDir: resolve(
+            process.env.JIRA_ATTACHMENTS_DIR?.trim() || join(tmpdir(), "jira-bitbucket-mcp", "attachments"),
+        ),
+        maxAttachmentBytes: parseInteger(process.env.JIRA_MAX_ATTACHMENT_BYTES, 0),
     };
 }

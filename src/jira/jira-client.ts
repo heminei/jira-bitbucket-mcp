@@ -24,4 +24,12 @@ export class JiraClient extends ApiClient {
     get maxTextLength(): number {
         return this.config.maxTextLength;
     }
+
+    get attachmentsDir(): string {
+        return this.config.attachmentsDir;
+    }
+
+    get maxAttachmentBytes(): number {
+        return this.config.maxAttachmentBytes;
+    }
 }

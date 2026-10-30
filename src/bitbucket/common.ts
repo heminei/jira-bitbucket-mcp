@@ -59,3 +59,49 @@ export function summarizePullRequest(pr: Record<string, unknown>, client: Bitbuc
         description: truncate(pr.description, client.maxTextLength),
     };
 }
+
+export function encodePath(path: string): string {
+    return path.split("/").map(encodeURIComponent).join("/");
+}
+
+/** Bitbucket serialises paths as objects whose `toString` field holds the full path. */
+function pathString(value: unknown): string | null {
+    if (value && typeof value === "object") {
+        const text = (value as { toString?: unknown }).toString;
+        return typeof text === "string" ? text : null;
+    }
+    return typeof value === "string" ? value : null;
+}
+
+export function summarizeChange(change: Record<string, unknown>): Record<string, unknown> {
+    return {
+        path: pathString(change.path),
+        srcPath: pathString(change.srcPath),
+        type: change.type ?? null,
+        nodeType: change.nodeType ?? null,
+    };
+}
+
+/** Comment projection including inline anchor, review state and nested replies. */
+export function summarizeComment(
+    comment: Record<string, unknown>,
+    client: BitbucketClient,
+    anchor?: Record<string, unknown>,
+): Record<string, unknown> {
+    const resolvedAnchor = (anchor ?? comment.anchor) as Record<string, unknown> | undefined;
+    const replies = Array.isArray(comment.comments) ? (comment.comments as Record<string, unknown>[]) : [];
+
+    return {
+        id: comment.id ?? null,
+        version: comment.version ?? null,
+        author: (comment.author as Record<string, unknown> | undefined)?.displayName ?? null,
+        createdDate: comment.createdDate ?? null,
+        text: truncate(comment.text, client.maxTextLength),
+        state: comment.state ?? null,
+        severity: comment.severity ?? null,
+        anchor: resolvedAnchor
+            ? { path: resolvedAnchor.path ?? null, line: resolvedAnchor.line ?? null, lineType: resolvedAnchor.lineType ?? null }
+            : null,
+        replies: replies.map((reply) => summarizeComment(reply, client)),
+    };
+}

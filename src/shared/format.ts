@@ -8,6 +8,15 @@ export function textResult(text: string): CallToolResult {
     return { content: [{ type: "text", text }] };
 }
 
+export function imageResult(metadata: unknown, data: Buffer, mimeType: string): CallToolResult {
+    return {
+        content: [
+            { type: "text", text: JSON.stringify(metadata, null, 2) },
+            { type: "image", data: data.toString("base64"), mimeType },
+        ],
+    };
+}
+
 export function truncate(value: unknown, limit: number): string | null {
     if (typeof value !== "string" || value === "") {
         return null;

@@ -11,7 +11,7 @@ async function main(): Promise<void> {
     const client = new BitbucketClient(config);
 
     const server = new McpServer(
-        { name: "bitbucket-server", version: "1.0.0" },
+        { name: "bitbucket-server", version: "1.1.0" },
         {
             instructions:
                 "Tools for a self-hosted Bitbucket Server / Data Center instance (REST API 1.0). " +

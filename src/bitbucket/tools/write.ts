@@ -5,12 +5,12 @@ import type { BitbucketClient } from "../bitbucket-client.js";
 import { assertWritable, prSchema, repoSchema, summarizePullRequest } from "../common.js";
 
 /** Bitbucket rejects concurrent edits unless the caller supplies the current entity version. */
-async function currentVersion(client: BitbucketClient, base: string): Promise<number> {
-    const pr = await client.request<{ version?: number }>(base);
-    if (typeof pr.version !== "number") {
-        throw new Error("Could not read the pull request version required for this operation.");
+async function currentVersion(client: BitbucketClient, base: string, entity = "pull request"): Promise<number> {
+    const current = await client.request<{ version?: number }>(base);
+    if (typeof current.version !== "number") {
+        throw new Error(`Could not read the ${entity} version required for this operation.`);
     }
-    return pr.version;
+    return current.version;
 }
 
 export function registerWriteTools(server: McpServer, client: BitbucketClient): void {
@@ -93,16 +93,17 @@ export function registerWriteTools(server: McpServer, client: BitbucketClient): 
         "bitbucket_add_pull_request_comment",
         {
             title: "Bitbucket: comment on pull request",
-            description: "Add a general comment, or an inline comment anchored to a file and line.",
+            description: "Add a general comment, an inline comment anchored to a file and line, or a reply to an existing comment.",
             inputSchema: {
                 ...prSchema,
                 text: z.string().trim().min(1).describe("Comment body in Markdown."),
+                parentId: z.number().int().min(1).optional().describe("Id of the comment to reply to."),
                 path: z.string().trim().optional().describe("File path for an inline comment."),
                 line: z.number().int().min(1).optional().describe("Line number for an inline comment. Requires path."),
                 lineType: z.enum(["ADDED", "REMOVED", "CONTEXT"]).optional().describe("Diff line type. Defaults to CONTEXT."),
             },
         },
-        async ({ project, repo, pullRequestId, text, path, line, lineType }) => {
+        async ({ project, repo, pullRequestId, text, parentId, path, line, lineType }) => {
             assertWritable(client);
 
             if (line !== undefined && !path) {
@@ -110,6 +111,9 @@ export function registerWriteTools(server: McpServer, client: BitbucketClient): 
             }
 
             const body: Record<string, unknown> = { text };
+            if (parentId !== undefined) {
+                body.parent = { id: parentId };
+            }
             if (path) {
                 body.anchor = {
                     path,
@@ -126,6 +130,44 @@ export function registerWriteTools(server: McpServer, client: BitbucketClient): 
             );
 
             return textResult(`Added comment ${comment.id ?? ""} to PR #${pullRequestId}.`.trim());
+        },
+    );
+
+    server.registerTool(
+        "bitbucket_update_pull_request_comment",
+        {
+            title: "Bitbucket: edit pull request comment",
+            description: "Edit a comment's text, mark it resolved or reopen it, or change its severity (NORMAL comment vs BLOCKER task).",
+            inputSchema: {
+                ...prSchema,
+                commentId: z.number().int().min(1).describe("Comment id."),
+                text: z.string().trim().min(1).optional().describe("New comment text in Markdown."),
+                state: z.enum(["OPEN", "RESOLVED"]).optional().describe("Resolve or reopen the comment."),
+                severity: z.enum(["NORMAL", "BLOCKER"]).optional().describe("BLOCKER turns the comment into a task."),
+            },
+        },
+        async ({ project, repo, pullRequestId, commentId, text, state, severity }) => {
+            assertWritable(client);
+
+            if (text === undefined && state === undefined && severity === undefined) {
+                throw new Error("Nothing to update: provide text, state or severity.");
+            }
+
+            const path = `${client.repoPath(project, repo)}/pull-requests/${pullRequestId}/comments/${commentId}`;
+            const body: Record<string, unknown> = { version: await currentVersion(client, path, "comment") };
+            if (text !== undefined) {
+                body.text = text;
+            }
+            if (state !== undefined) {
+                body.state = state;
+            }
+            if (severity !== undefined) {
+                body.severity = severity;
+            }
+
+            await client.request(path, { method: "PUT", body });
+
+            return textResult(`Updated comment ${commentId} on PR #${pullRequestId}.`);
         },
     );
 
@@ -150,6 +192,37 @@ export function registerWriteTools(server: McpServer, client: BitbucketClient): 
             return textResult(`Set review status of PR #${pullRequestId} to ${status}.`);
         },
     );
+
+    if (client.allowDelete) {
+        server.registerTool(
+            "bitbucket_delete_pull_request_comment",
+            {
+                title: "Bitbucket: delete pull request comment",
+                description:
+                    "Permanently delete a pull request comment (only your own, unless you are an admin). Requires BITBUCKET_ALLOW_DELETE=1.",
+                inputSchema: {
+                    ...prSchema,
+                    commentId: z.number().int().min(1).describe("Comment id."),
+                    confirm: z.literal(true).describe("Must be true to acknowledge that the deletion is irreversible."),
+                },
+            },
+            async ({ project, repo, pullRequestId, commentId }) => {
+                assertWritable(client);
+
+                if (!client.allowDelete) {
+                    throw new Error("Deleting comments is disabled; start the server with BITBUCKET_ALLOW_DELETE=1 to enable it.");
+                }
+
+                const path = `${client.repoPath(project, repo)}/pull-requests/${pullRequestId}/comments/${commentId}`;
+                await client.request(path, {
+                    method: "DELETE",
+                    query: { version: await currentVersion(client, path, "comment") },
+                });
+
+                return textResult(`Deleted comment ${commentId} on PR #${pullRequestId}.`);
+            },
+        );
+    }
 
     if (!client.allowMerge) {
         return;

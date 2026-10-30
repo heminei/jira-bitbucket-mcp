@@ -22,6 +22,10 @@ export class BitbucketClient extends ApiClient {
         return this.config.allowMerge;
     }
 
+    get allowDelete(): boolean {
+        return this.config.allowDelete;
+    }
+
     get maxTextLength(): number {
         return this.config.maxTextLength;
     }
