@@ -5,7 +5,7 @@ import { jsonResult, textResult } from "../../shared/format.js";
 import type { JiraClient } from "../jira-client.js";
 
 const extraFields = z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .optional()
     .describe('Additional raw Jira fields keyed by field id, e.g. {"customfield_10001": "value"}.');
 
