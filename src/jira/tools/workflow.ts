@@ -22,7 +22,7 @@ export function registerWorkflowTools(server: McpServer, client: JiraClient): vo
                 transitionName: z.string().trim().optional().describe('Transition name, e.g. "Done". Matched case-insensitively.'),
                 comment: z.string().trim().optional().describe("Comment to add as part of the transition."),
                 fields: z
-                    .record(z.unknown())
+                    .record(z.string(), z.unknown())
                     .optional()
                     .describe("Fields required by the transition screen, keyed by field id."),
             },
